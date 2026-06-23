@@ -1,0 +1,408 @@
+# ───────────────────────────────────────────────────────────────────────────
+# S/4HANA Simplification-Item Rule Catalog
+# ───────────────────────────────────────────────────────────────────────────
+# Open dataset of pattern-based S/4HANA custom-code incompatibility rules.
+# Each rule is matched against raw ABAP source by the rules engine BEFORE
+# Claude augments the findings. Contributions welcome — add a rule below.
+#
+# Fields:
+#   id                  Stable rule id (also used as the simplification key)
+#   simplification_item Human-facing S4TWL-style reference
+#   title               One-line summary
+#   category            Theme used for grouping in the executive report
+#   severity            BLOCKER | HIGH | MEDIUM | LOW | INFO
+#   effort              "< 1 day" | "1–3 days" | "1 week" | "> 1 week"
+#   patterns            List of (case-insensitive) regex matched per line
+#   description / root_cause / business_impact / remediation
+#   sap_note            Always "Verify in SAP Launchpad" unless certain
+# ───────────────────────────────────────────────────────────────────────────
+
+- id: BP_CVI_MASTER
+  simplification_item: S4TWL - Business Partner Approach (CVI)
+  title: Direct access to customer/vendor master (KNA1/LFA1) — Business Partner is mandatory
+  category: Master Data
+  severity: BLOCKER
+  effort: "> 1 week"
+  patterns:
+    - 'FROM\s+KNA1\b'
+    - 'FROM\s+LFA1\b'
+    - 'FROM\s+KNB1\b'
+    - 'FROM\s+LFB1\b'
+  description: >-
+    Code reads customer (KNA1) or vendor (LFA1) master tables directly. In
+    S/4HANA the Business Partner (BP) is the single point of entry for master
+    data and Customer/Vendor Integration (CVI) is mandatory.
+  root_cause: >-
+    Customer and vendor masters are now projections of the Business Partner.
+    Direct table access bypasses BP data model rules and can read inconsistent
+    or incomplete records if CVI synchronization is not in place.
+  business_impact: >-
+    Programs that create or update customers/vendors via legacy tables or BAPIs
+    will fail or create data inconsistencies. Read-only access still works via
+    compatibility but should be reviewed against the BP model.
+  remediation: >-
+    Route create/update operations through Business Partner APIs
+    (e.g. BAPI_BUPA_* / the BP transaction). For reads, confirm the field is
+    still sourced from KNA1/LFA1 in S/4HANA, otherwise switch to BP views.
+  sap_note: Verify in SAP Launchpad
+
+- id: FI_ACDOCA_SECONDARY_INDEX
+  simplification_item: S4TWL - FI Secondary Index Tables Removed (BSIS/BSAS/BSID/BSAD/BSIK/BSAK)
+  title: Access to removed FI secondary index tables (BSIS/BSAS/BSID/BSAD/BSIK/BSAK)
+  category: Database Layer
+  severity: BLOCKER
+  effort: "1 week"
+  patterns:
+    - 'FROM\s+BSIS\b'
+    - 'FROM\s+BSAS\b'
+    - 'FROM\s+BSID\b'
+    - 'FROM\s+BSAD\b'
+    - 'FROM\s+BSIK\b'
+    - 'FROM\s+BSAK\b'
+  description: >-
+    The FI open/cleared item secondary index tables have been removed in
+    S/4HANA. They are replaced by the Universal Journal (ACDOCA) and CDS-based
+    compatibility views.
+  root_cause: >-
+    With the Universal Journal, FI/CO line items live in ACDOCA. The old index
+    tables are no longer updated; equally named compatibility views exist but
+    have different performance and update semantics.
+  business_impact: >-
+    Reports relying on these tables return empty or stale data, or break on
+    fields that no longer exist. Any write/INSERT to these tables fails.
+  remediation: >-
+    Replace direct SELECTs with the provided compatibility CDS views or query
+    ACDOCA directly. Remove any INSERT/UPDATE/MODIFY against these tables.
+  sap_note: Verify in SAP Launchpad
+
+- id: SD_VBUK_VBUP_STATUS
+  simplification_item: S4TWL - SD Status Tables VBUK/VBUP Removed
+  title: Access to removed SD status tables VBUK/VBUP
+  category: Database Layer
+  severity: HIGH
+  effort: "1–3 days"
+  patterns:
+    - 'FROM\s+VBUK\b'
+    - 'FROM\s+VBUP\b'
+  description: >-
+    The SD header/item status tables VBUK and VBUP have been removed. Status
+    fields were moved into the corresponding document tables (VBAK/VBAP, LIKP/LIPS).
+  root_cause: >-
+    To reduce redundancy the status fields are now stored on the document
+    tables themselves rather than in separate status tables.
+  business_impact: >-
+    SELECTs against VBUK/VBUP fail to compile or return no data; status-driven
+    logic (delivery status, billing status) silently misbehaves.
+  remediation: >-
+    Read the status fields directly from VBAK/VBAP/LIKP/LIPS, or use the
+    compatibility views shipped for VBUK/VBUP.
+  sap_note: Verify in SAP Launchpad
+
+- id: SD_KONV_PRCD_ELEMENTS
+  simplification_item: S4TWL - Pricing Conditions Table KONV Renamed (PRCD_ELEMENTS)
+  title: Direct access to pricing table KONV (now PRCD_ELEMENTS)
+  category: Database Layer
+  severity: HIGH
+  effort: "1–3 days"
+  patterns:
+    - 'FROM\s+KONV\b'
+    - '\bKONV-'
+  description: >-
+    The condition table KONV has been replaced by PRCD_ELEMENTS with an extended
+    key and data model.
+  root_cause: >-
+    Pricing result persistence was redesigned. KONV remains as a compatibility
+    view but custom writes and some field assumptions no longer hold.
+  business_impact: >-
+    Custom pricing reports and condition updates referencing KONV directly may
+    read incomplete data or fail on writes.
+  remediation: >-
+    Switch reads to PRCD_ELEMENTS (or the KONV compatibility view) and verify
+    key fields. Replace any direct modification of KONV.
+  sap_note: Verify in SAP Launchpad
+
+- id: MATNR_FIELD_LENGTH
+  simplification_item: S4TWL - Material Number Field Length Extension
+  title: Hard-coded material number length / MATNR offset assumptions
+  category: Data Model
+  severity: HIGH
+  effort: "1 week"
+  patterns:
+    - 'MATNR\+\d+\(\d+\)'
+    - "MATNR\\(18\\)"
+    - 'DATA:?\s+\w+\s+TYPE\s+C\s+LENGTH\s+18'
+  description: >-
+    Code makes fixed-length (18-char) assumptions about the material number via
+    offset/length access. S/4HANA supports an extended 40-character MATNR.
+  root_cause: >-
+    The material number field length can be extended to 40 characters. Offset
+    operations and CHAR(18) declarations truncate or misalign extended values.
+  business_impact: >-
+    Material numbers longer than 18 characters are truncated, breaking lookups,
+    output, and interfaces.
+  remediation: >-
+    Use the data element MATNR / domain MATN1 for typing instead of fixed CHAR
+    lengths, and remove offset arithmetic on MATNR.
+  sap_note: Verify in SAP Launchpad
+
+- id: NATIVE_SQL_EXEC
+  simplification_item: BC - Native SQL / Database Hints
+  title: Native SQL (EXEC SQL) bypasses the database abstraction layer
+  category: Database Layer
+  severity: HIGH
+  effort: "1–3 days"
+  patterns:
+    - '\bEXEC\s+SQL\b'
+    - '\bENDEXEC\b'
+  description: >-
+    Native SQL embeds database-specific statements that may reference tables or
+    columns that no longer exist under the S/4HANA (HANA) data model.
+  root_cause: >-
+    Native SQL is tightly coupled to the underlying database schema and bypasses
+    Open SQL portability and the simplified S/4 data model.
+  business_impact: >-
+    Statements referencing removed/renamed tables fail at runtime; database
+    hints tuned for the old platform can degrade HANA performance.
+  remediation: >-
+    Re-implement using Open SQL / CDS views. Remove DB-specific hints. Only keep
+    Native SQL where strictly unavoidable and validate against HANA.
+  sap_note: Verify in SAP Launchpad
+
+- id: SELECT_STAR
+  simplification_item: BC_ABAP_SELECT_STAR
+  title: SELECT * reads all columns of wide HANA tables
+  category: Performance
+  severity: MEDIUM
+  effort: "< 1 day"
+  patterns:
+    - 'SELECT\s+\*\s+FROM'
+    - 'SELECT\s+SINGLE\s+\*\s+FROM'
+  description: >-
+    SELECT * fetches every column. On a column-store database this defeats the
+    main HANA optimization of reading only the columns needed.
+  root_cause: >-
+    HANA stores data column-wise; reading all columns forces materialization of
+    columns the program never uses.
+  business_impact: >-
+    Unnecessary memory and CPU consumption, slower reports, and fragile code
+    when table structures change.
+  remediation: >-
+    Specify an explicit field list in the SELECT and a matching typed target
+    structure or internal table.
+  sap_note: Verify in SAP Launchpad
+
+- id: SELECT_NO_ORDER_BY
+  simplification_item: BC_ABAP_IMPLICIT_SORT
+  title: SELECT relies on implicit sort order (no ORDER BY)
+  category: Database Layer
+  severity: HIGH
+  effort: "< 1 day"
+  patterns:
+    - 'SELECT\s+.*\s+UP\s+TO\s+\d+\s+ROWS'
+    - '\bSELECT\s+SINGLE\b(?!.*WHERE)'
+  description: >-
+    Reading a limited number of rows (UP TO n ROWS) or SELECT SINGLE without a
+    full key relies on an order that HANA does not guarantee.
+  root_cause: >-
+    Unlike some classic databases, HANA does not return rows in primary-key
+    order unless ORDER BY is specified.
+  business_impact: >-
+    "First" / "single" record logic returns a different, unpredictable row,
+    producing wrong results that are hard to reproduce.
+  remediation: >-
+    Add an explicit ORDER BY that defines the intended record, or use MAX/MIN
+    aggregation. For SELECT SINGLE, supply the full key.
+  sap_note: Verify in SAP Launchpad
+
+- id: OBSOLETE_INTERNAL_TABLE
+  simplification_item: BC - Obsolete Internal Table Syntax
+  title: Header lines / OCCURS / obsolete table statements
+  category: ABAP Syntax
+  severity: HIGH
+  effort: "1–3 days"
+  patterns:
+    - '\bOCCURS\s+\d+'
+    - 'WITH\s+HEADER\s+LINE'
+  description: >-
+    Internal tables with header lines and the OCCURS addition are obsolete and
+    are not allowed in classes / Unicode-strict and S/4 strict ABAP contexts.
+  root_cause: >-
+    Header lines blur the line between table and work area, a pattern banned in
+    modern (OO, strict) ABAP required for clean S/4 custom code.
+  business_impact: >-
+    Code cannot be wrapped in classes or moved to RAP/clean-core patterns; raises
+    syntax errors under strict mode.
+  remediation: >-
+    Declare an explicit work area, replace OCCURS with STANDARD/SORTED/HASHED
+    TABLE OF, and use APPEND ... TO / READ TABLE ... INTO.
+  sap_note: Verify in SAP Launchpad
+
+- id: OBSOLETE_STATEMENTS
+  simplification_item: BC - Obsolete Computation Statements
+  title: Obsolete statements (ADD / SUBTRACT / MOVE / COMPUTE)
+  category: ABAP Syntax
+  severity: LOW
+  effort: "< 1 day"
+  patterns:
+    - '^\s*ADD\s+\w+\s+TO\b'
+    - '^\s*SUBTRACT\s+\w+\s+FROM\b'
+    - '^\s*MULTIPLY\s+\w+\s+BY\b'
+    - '^\s*MOVE\s+\w+\s+TO\b'
+  description: >-
+    ADD/SUBTRACT/MULTIPLY/MOVE are obsolete keyword statements replaced by
+    expression-based assignments.
+  root_cause: >-
+    Modern ABAP favors operator expressions (=, +=, -=) which are clearer and
+    required in strict OO contexts.
+  business_impact: >-
+    Advisory only — code still runs, but is flagged by ATC/clean-core checks and
+    is harder to maintain.
+  remediation: >-
+    Rewrite as expressions, e.g. `lv_total = lv_total + lv_amount` or
+    `lv_total += lv_amount`.
+  sap_note: Verify in SAP Launchpad
+
+- id: TABLES_LDB
+  simplification_item: BC - TABLES Statement / Logical Databases
+  title: TABLES statement and logical-database usage
+  category: ABAP Syntax
+  severity: MEDIUM
+  effort: "1–3 days"
+  patterns:
+    - '^\s*TABLES:\s'
+    - '\bGET\s+\w+\s+LATE\b'
+    - '\bNODES\b'
+  description: >-
+    The TABLES statement (shared work areas) and classical logical databases are
+    legacy constructs discouraged in S/4 clean-core development.
+  root_cause: >-
+    TABLES creates global shared structures with side effects; logical databases
+    are largely superseded by CDS and SADL-based data access.
+  business_impact: >-
+    Hidden coupling and global state complicate migration to OO and RAP; some
+    logical databases are no longer maintained.
+  remediation: >-
+    Replace TABLES with explicit local data declarations; replace logical
+    databases with CDS views or direct Open SQL.
+  sap_note: Verify in SAP Launchpad
+
+- id: CLASSIC_LIST_WRITE
+  simplification_item: S4TWL - Classical List Output / SAP GUI Only
+  title: Classical list output (WRITE / list events) — not Fiori-ready
+  category: UI / Output
+  severity: LOW
+  effort: "1 week"
+  patterns:
+    - '^\s*WRITE[:\s]'
+    - '\bAT\s+LINE-SELECTION\b'
+    - '\bTOP-OF-PAGE\b'
+  description: >-
+    Classical list processing with WRITE and list events renders only in SAP GUI
+    and has no Fiori/UI5 equivalent.
+  root_cause: >-
+    The S/4HANA UX strategy is Fiori-first. Classical lists cannot be surfaced
+    in the Fiori launchpad.
+  business_impact: >-
+    Output is invisible to Fiori users; blocks adoption of the target UX. Logic
+    still runs in GUI sessions.
+  remediation: >-
+    Move presentation to an ALV grid (CL_SALV) as an interim step, and ultimately
+    expose the data via a CDS-based Fiori app or OData service.
+  sap_note: Verify in SAP Launchpad
+
+- id: SAPSCRIPT_SMARTFORMS
+  simplification_item: S4TWL - Output Management (SAPscript / Smart Forms)
+  title: SAPscript / Smart Forms output — superseded by Adobe / Output Management
+  category: UI / Output
+  severity: MEDIUM
+  effort: "1 week"
+  patterns:
+    - '\bOPEN_FORM\b'
+    - '\bWRITE_FORM\b'
+    - '\bSSF_FUNCTION_MODULE_NAME\b'
+    - '\bCALL\s+FUNCTION\s+''SSF'
+  description: >-
+    SAPscript and Smart Forms are still executable but are not the strategic
+    output technology in S/4HANA, which favors SAP Output Management with Adobe
+    forms (Fragments / BRF+).
+  root_cause: >-
+    New output scenarios are delivered on Adobe Document Server + Output
+    Management; SAPscript is legacy.
+  business_impact: >-
+    Increasing maintenance risk and no alignment with new output determination;
+    some pre-delivered forms are only available as Adobe forms.
+  remediation: >-
+    Plan migration of strategic forms to Adobe Forms with SAP Output Management.
+    Keep SAPscript only for stable legacy documents.
+  sap_note: Verify in SAP Launchpad
+
+- id: NAST_OUTPUT_DETERMINATION
+  simplification_item: S4TWL - Output Determination (NAST)
+  title: NAST-based output determination
+  category: UI / Output
+  severity: MEDIUM
+  effort: "1–3 days"
+  patterns:
+    - 'FROM\s+NAST\b'
+    - '\bRV_MESSAGE'
+  description: >-
+    Message/output determination via NAST is replaced in key processes by the
+    new SAP S/4HANA Output Management based on BRF+.
+  root_cause: >-
+    Selected applications (e.g. billing) default to the new output management;
+    NAST remains for some but is not strategic.
+  business_impact: >-
+    Custom output programs hooked into NAST may not trigger where the new output
+    management is active.
+  remediation: >-
+    Check whether the process uses the new Output Management; if so, re-implement
+    via BRF+ output parameters and Adobe forms.
+  sap_note: Verify in SAP Launchpad
+
+- id: CALL_TRANSACTION_OBSOLETE
+  simplification_item: S4TWL - Transaction Code Not Available
+  title: CALL TRANSACTION / batch input to a transaction that may be removed
+  category: Process
+  severity: MEDIUM
+  effort: "1–3 days"
+  patterns:
+    - "CALL\\s+TRANSACTION\\s+'(MIGO|ME21|ME22|VA01|MM01|XK01|XD01|FB01)'"
+    - '\bBDC_INSERT\b'
+    - '\bBDCDATA\b'
+  description: >-
+    Calling classic transactions via CALL TRANSACTION or batch input (BDC) is
+    fragile in S/4HANA, where some transactions are removed or replaced by Fiori
+    apps and BAPIs.
+  root_cause: >-
+    Screen flows of classic transactions change or disappear; BDC recordings
+    bound to specific dynpros break.
+  business_impact: >-
+    Automation breaks when the underlying transaction or screen is changed or
+    not available.
+  remediation: >-
+    Replace BDC/CALL TRANSACTION with released BAPIs or OData/RAP business APIs
+    for the corresponding process.
+  sap_note: Verify in SAP Launchpad
+
+- id: HARD_CODED_CLIENT
+  simplification_item: BC - CLIENT SPECIFIED / Hard-coded Client
+  title: CLIENT SPECIFIED or hard-coded MANDT handling
+  category: ABAP Syntax
+  severity: LOW
+  effort: "< 1 day"
+  patterns:
+    - '\bCLIENT\s+SPECIFIED\b'
+    - "MANDT\\s*=\\s*'\\d+'"
+  description: >-
+    Explicit client handling (CLIENT SPECIFIED) or hard-coded client values are
+    error-prone and usually unnecessary.
+  root_cause: >-
+    The application server already provides automatic client handling; manual
+    handling risks cross-client data access.
+  business_impact: >-
+    Potential data leakage across clients and incorrect results after system
+    copies / client changes.
+  remediation: >-
+    Remove CLIENT SPECIFIED and hard-coded MANDT values; rely on automatic
+    client handling unless a cross-client scenario is genuinely required.
+  sap_note: Verify in SAP Launchpad
