@@ -1,0 +1,18 @@
+{
+  "name": "abap-copilot-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server exposing the ABAP Modernization Copilot S/4HANA scan engine as tools.",
+  "bin": {
+    "abap-copilot-mcp": "server.mjs"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "yaml": "^2.6.1"
+  }
+}

@@ -26,6 +26,10 @@
 
 ## 🧭 Architecture
 
+<p align="center">
+  <img src="docs/architecture.svg" alt="ABAP Modernization Copilot architecture" width="100%" />
+</p>
+
 ```
  ABAP upload ──▶ YAML Rules Engine ──▶ Claude (or demo engine) ──▶ Findings ──▶ Word report
  (drag & drop)   (simplification       (severity, remediation,    (score +       (.docx)
@@ -59,6 +63,8 @@ src/
 └─ rules/
    └─ simplification-items.yaml   # open rule dataset — contributions welcome
 samples/                      # synthetic ABAP programs to scan immediately
+mcp/                          # MCP server exposing the scan engine as tools
+docs/architecture.svg         # architecture diagram
 ```
 
 ## 🚀 Quick start
@@ -96,6 +102,40 @@ npm i -g vercel
 vercel            # preview deploy
 vercel --prod     # production deploy
 ```
+
+## 🔌 MCP server (Claude Desktop)
+
+The scan engine is also exposed as an **MCP server**, so you can scan ABAP and
+browse the rule catalog directly from any MCP client (e.g. Claude Desktop) —
+no web UI needed.
+
+```bash
+cd mcp
+npm install
+npm run smoke   # spins up the server over stdio and runs a test scan
+```
+
+**Tools exposed:**
+
+| Tool | Description |
+|---|---|
+| `scan_abap` | Scan ABAP `source` → findings (severity, lines, root cause, remediation), 0–100 readiness score, severity breakdown. |
+| `list_simplification_rules` | List the rule catalog, optionally filtered by `category` / `severity`. |
+
+**Claude Desktop config** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "abap-copilot": {
+      "command": "node",
+      "args": ["ABSOLUTE/PATH/TO/abap_copilot/mcp/server.mjs"]
+    }
+  }
+}
+```
+
+Then ask Claude Desktop: *"Scan this ABAP program for S/4HANA blockers"* and paste your code.
 
 ## 🧩 Extending the rules
 
